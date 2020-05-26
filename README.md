@@ -1,7 +1,7 @@
 # minspector
 Scriptable milter.
 
-Emails are analyzed using user python scripts. Based on https://pythonhosted.org/milter/.
+Emails are analyzed using python scripts. Based on https://pythonhosted.org/milter/.
 
 ## Usage
 ```python
