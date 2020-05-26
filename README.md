@@ -22,7 +22,7 @@ milter = 'MINSPECTOR'
 LOG.info('Starting {}'.format(milter))
 Milter.runmilter(milter, '/run/minspector/sock')
 ```
-The `MInspector` milter puts the email in a standard format and executes a series of tests defined by writing python code. 
+The `MInspector` milter receives the the email from the SMTP server, truncate the body to ~100 K, put in a standard format and executes a series of tests defined by writing python code. 
 
 ## Writing tests
 A test is created by defining a class which inherits the `minspector.Test` class and by instantiating this class:
