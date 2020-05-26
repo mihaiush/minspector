@@ -44,11 +44,11 @@ The milter will execute first the `main` method of each test and after that for 
   - `.helo`, hello message
   - `.mail_from`, sender
   - `.rcpt_to`, array of recipients
-  - `.headers`, `.headers_raw`, if `headers_raw` is `False`, `headers` is a dictionary of lowercase headers. If `headers_raw` is `True` an error has occured during headers processing and `headers` is a list of tuples as received by milter.
+  - `.headers`, `.headers_raw`, if `headers_raw` is `False`, `headers` is a dictionary of lowercase headers. If `headers_raw` is `True` an error has occurred during headers processing and `headers` is a list of tuples as received by milter.
   - `.text`, an array containing the text lines from the body preamble and all the parts of the body with content type `text/*`
 - `text_line`, only for `line` method, is the current line of `email.text`
 
-Each method must return `True` for a positive test and `False` for a negative one. `main` should be used for initialization and for tests which don't require the body of the message (decision is based on headers and protocol data) and `line` should be used for tests requering the body. However as the `email.text` attribute is also present in `main` it is possible to analyze the text here and don't use `line` at all.
+Each method must return `True` for a positive test and `False` for a negative one. `main` should be used for initialization and for tests which don't require the body of the message (decision is based on headers and protocol data) and `line` should be used for tests requiring the body. However as the `email.text` attribute is also present in `main` it is possible to analyze the text here and don't use `line` at all.
 
 What happens when a test is positive is decided by the way the test was instantiated. The constructor of `Test` class has the following parameters:
 - `label`, a text label which will identify the test in log and it can be used in the message sent back by the SMTP server to the client,
