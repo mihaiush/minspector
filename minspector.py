@@ -37,16 +37,20 @@ class Test:
         self.__label = label
         self.__policy = policy.upper()
         self.__message = message
-        self.__enable = True
+        self.__enable = {}
         TEST_LIST.append(self)
-    def enable(self):
-        self.__enable = True
-    def disable(self):
-        self.__enable = False
+    def enable(self,i):
+        self.__enable[i] = True
+    def disable(self,i):
+        self.__enable[i] = False
+    def status(self,i):
+        return self.__enable[i]
+    def cleanup(self,i):
+        del(self.__enable[i])
     def main(self, email):
         return False
-    def line(self, email, line):
-        return False
+    def line(self, email, line, p_index, p_type):
+        return None
 
 RE_B64BAD = re.compile('[\+\/=]')
 def b64str(x):
@@ -103,14 +107,31 @@ class MInspector(Milter.Base):
         s = self.test_stage[0].upper()
         msg=message.format(id=self.id, label=self.test_label, stage=s)
         if policy == 'REJECT':
-            self.setreply('554', msg=msg)
+            self.setreply('550', xcode='5.7.1', msg=msg)
             return Milter.REJECT
         elif policy == 'DEFER':
-            self.setreply('451', msg=msg)
+            self.setreply('451', xcode='4.7.1', msg=msg)
             return Milter.TEMPFAIL
         elif policy == 'DISCARD':
             return Milter.DISCARD
         return Milter.ACCEPT
+
+    def t_enable(self):
+        for t in TEST_LIST:
+            t.enable(self.id)
+    
+    def t_cleanup(self):
+        for t in TEST_LIST:
+            t.cleanup(self.id)
+
+    def t_status(self):
+        return TEST_LIST[self.test_index].status(self.id)
+
+    def t_disable(self):
+        TEST_LIST[self.test_index].disable(self.id)
+
+    def mark(self):
+        self.addheader('X-Minspector', self.test_label)
 
     @Milter.noreply
     def connect(self, ipname, family, hostaddr):
@@ -136,6 +157,8 @@ class MInspector(Milter.Base):
         self.headers_raw = []
         self.test_label = 'NA'
         self.test_stage = 'NA'
+        self.multipart = False
+        self.t_enable()
         #
         self.mail_from = f.lower()
         self.debug('envfrom', self.mail_from, extra)
@@ -149,9 +172,10 @@ class MInspector(Milter.Base):
 
     @Milter.noreply
     def header(self, h, v):
-        self.headers_raw.append([h, v])
         bh = '{}: {}\r\n'.format(h, v).encode('ascii', 'ignore')
         self.message.feed(bh)
+        h = h.lower()
+        self.headers_raw.append([h, v])
         self.debug('header', '{}={}'.format(h,v))
         return Milter.CONTINUE
 
@@ -176,16 +200,27 @@ class MInspector(Milter.Base):
     def eom(self):
         try:
             self.message = self.message.close()
+            self.multipart = self.message.is_multipart()
             # self.text = preabble + all parts with content-type text/*
             self.text = []
             if self.message.preamble:
                 self.debug('email-preamble', self.message.preamble)
-                self.text = self.text + self.message.preamble.split('\r\n')
+                self.text.append({'type': 'preamble', 'content': self.message.preamble})
             for part in self.message.walk():
                 if part.get_content_type().startswith('text/'):
                     text = part.get_payload(decode=True).decode('utf-8', 'ignore')
-                    self.debug('email-part', text)
-                    self.text = self.text + text.split('\r\n')
+                    if len(part.defects) > 0:
+                        defect = ''
+                        for d in part.defects:
+                            defect = '{}{}'.format(defect, type(d))
+                        if 'InvalidBase64Length' in defect:
+                            x = int(4 * int(len(text)/4))
+                            text = text[0:x]
+                            text = base64.b64decode(text).decode('utf-8', 'ignore')
+                        else:
+                            self.debug('email-part-defect', defect)
+                    self.debug('email-part-payload', text)
+                    self.text.append({'type': part.get_content_type(), 'content': text})
             # headers [(h,v)] -> {h:v}
             # if error headers -> milter headers
             try:
@@ -204,33 +239,42 @@ class MInspector(Milter.Base):
             if DROP_MESSAGE:
                 del(self.message)
             # run main() method of each test
-            for t in TEST_LIST:
+            for self.test_index,t in enumerate(TEST_LIST):
                 self.test_label = t._Test__label
                 self.test_stage = 'main'
                 if t.main(self) :
+                    self.t_disable()
                     if t._Test__policy in self.exit_policy:
+                        self.t_cleanup()
                         return self.exit(t)
                     self.log(t._Test__policy, verbose=True)
             # for each line run line() method of each test
             # disable test if match
-            for l in self.text:
-                enable = False
-                for t in TEST_LIST:
-                    if t._Test__enable:
-                        enable = True
-                        self.test_label = t._Test__label
-                        self.test_stage = 'line'
-                        if t.line(self, l) :
-                            if t._Test__policy in self.exit_policy:
-                                return self.exit(t)
-                            t._Test__enable = False
-                            self.log(t._Test__policy, verbose=True)
-                # terminate if all tests are disabled
-                if not enable:
-                    break
+            for i, part in enumerate(self.text):
+                for l in part['content'].split('\r\n'):
+                    enable = False
+                    for self.test_index,t in enumerate(TEST_LIST):
+                        if self.t_status():
+                            enable = True
+                            self.test_label = t._Test__label
+                            self.test_stage = 'line'
+                            rt = t.line(self, l, i, part['type'])
+                            if rt == None:
+                                rt = False
+                                self.t_disable()
+                            if rt :
+                                self.t_disable()
+                                if t._Test__policy in self.exit_policy:
+                                    self.t_cleanup()
+                                    return self.exit(t)
+                                self.log(t._Test__policy, verbose=True)
+                    # terminate if all tests are disabled
+                    if not enable:
+                        break
         except:
             LOG.error('body:\n{}'.format(traceback.format_exc()))  
             self.log('error-debug', verbose=True)
+        self.t_cleanup()
         return Milter.ACCEPT
 
 
@@ -248,4 +292,3 @@ if __name__ == '__main__':
     milter = 'MINSPECTOR'
     LOG.info('Starting {}[{}]'.format(milter, os.getpid()))
     Milter.runmilter(milter, '/run/minspector/sock')
-
